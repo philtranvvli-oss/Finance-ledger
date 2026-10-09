@@ -1,0 +1,226 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#141822">
+<meta name="robots" content="noindex,nofollow">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Ledger">
+<title>Li-Tran Finance Ledger</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/favicon-64.png">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<style>
+  :root { --ink:#141822; --panel:#1B212C; --line:#2E3646; --paper:#E9E5D8; --dim:#9CA3B0; --gold:#C9A24B; --brick:#C1666B; }
+  html, body { margin:0; height:100%; background:var(--ink); color:var(--paper); font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; }
+  #root { height:100%; }
+  #app { position:fixed; inset:0; width:100%; height:100%; border:0; display:block; background:var(--ink); }
+  .screen { min-height:100%; display:flex; align-items:center; justify-content:center; padding:24px 16px; box-sizing:border-box; }
+  .card { width:100%; max-width:420px; background:var(--panel); border:1px solid var(--line); border-radius:14px; padding:24px; box-sizing:border-box; }
+  .brand { display:flex; align-items:center; gap:12px; margin-bottom:16px; }
+  .brand img { width:44px; height:44px; border-radius:10px; }
+  h1 { font:400 22px Georgia,"Times New Roman",serif; margin:0; }
+  p { color:var(--dim); margin:0 0 14px; font-size:14px; }
+  label { display:block; font-size:12px; letter-spacing:1px; color:var(--gold); margin:4px 0 6px; }
+  input { width:100%; box-sizing:border-box; padding:11px 12px; border-radius:8px; border:1px solid var(--line); background:var(--ink); color:var(--paper); font:14px ui-monospace,Menlo,Consolas,monospace; }
+  input:focus { outline:2px solid var(--gold); outline-offset:1px; }
+  button { margin-top:14px; width:100%; padding:11px; border-radius:8px; border:0; background:var(--gold); color:var(--ink); font-weight:700; font-size:15px; cursor:pointer; }
+  button[disabled] { opacity:.6; cursor:default; }
+  .err { color:var(--brick); font-size:13px; margin-top:10px; min-height:1em; }
+  .loading { color:var(--dim); font-size:14px; display:flex; flex-direction:column; align-items:center; gap:14px; }
+  .spin { width:28px; height:28px; border:3px solid var(--line); border-top-color:var(--gold); border-radius:50%; animation:spin 0.9s linear infinite; }
+  @keyframes spin { to { transform:rotate(360deg); } }
+  #banner { position:fixed; left:50%; bottom:calc(16px + env(safe-area-inset-bottom,0px)); transform:translateX(-50%); z-index:10; max-width:min(92vw,520px); background:#3a1e22; color:#f5d6d8; border:1px solid var(--brick); border-radius:10px; padding:10px 14px; font-size:13px; box-shadow:0 8px 24px rgb(0 0 0/.4); display:none; }
+  #banner button { width:auto; margin:8px 8px 0 0; padding:6px 12px; font-size:13px; }
+  #banner button.ghost { background:transparent; color:#f5d6d8; border:1px solid #f5d6d8; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+<div id="banner" role="alert"></div>
+<script>
+(function () {
+  "use strict";
+  // Where the private app and data live. Nothing personal is stored in this public file.
+  var OWNER = "philtranvvli-oss", REPO = "Finance-ledger-data", BRANCH = "main";
+  var LEDGER_PATH = "app/ledger.html", STATE_PATH = "data/state.json";
+  var KEY_STORE = "ledger.githubKey";
+  var API = "https://api.github.com/repos/" + OWNER + "/" + REPO + "/contents/";
+
+  var root = document.getElementById("root");
+  var banner = document.getElementById("banner");
+
+  function getKey() { try { return localStorage.getItem(KEY_STORE) || ""; } catch (e) { return ""; } }
+  function setKey(k) { try { localStorage.setItem(KEY_STORE, k); } catch (e) {} }
+  function clearKey() { try { localStorage.removeItem(KEY_STORE); } catch (e) {} }
+
+  if (/[?&]signout\b/.test(location.search)) { clearKey(); history.replaceState(null, "", location.pathname); }
+
+  function headers(extra) {
+    var h = { "Authorization": "Bearer " + getKey(), "X-GitHub-Api-Version": "2022-11-28" };
+    for (var k in extra || {}) h[k] = extra[k];
+    return h;
+  }
+  function b64ToText(b64) {
+    var bin = atob(b64.replace(/\s/g, "")), bytes = new Uint8Array(bin.length);
+    for (var i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    return new TextDecoder("utf-8").decode(bytes);
+  }
+  function textToB64(text) {
+    var bytes = new TextEncoder().encode(text), bin = "", CH = 0x8000;
+    for (var i = 0; i < bytes.length; i += CH) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + CH));
+    return btoa(bin);
+  }
+  function httpError(res, what) {
+    var e = new Error(what + " failed (" + res.status + ")"); e.status = res.status; return e;
+  }
+
+  // Offline fallback: keep the last good copy of each private file in Cache Storage.
+  var CACHE = "ledger-private-v1";
+  function cachePut(path, text) {
+    if (!("caches" in window)) return;
+    caches.open(CACHE).then(function (c) { c.put(new Request("./__private__/" + path), new Response(text)); }).catch(function () {});
+  }
+  function cacheGet(path) {
+    if (!("caches" in window)) return Promise.resolve(null);
+    return caches.open(CACHE).then(function (c) { return c.match(new Request("./__private__/" + path)); })
+      .then(function (r) { return r ? r.text() : null; }).catch(function () { return null; });
+  }
+  function cacheClear() { if ("caches" in window) caches.delete(CACHE).catch(function () {}); }
+
+  // Raw file text (for the app pages).
+  function getRaw(path) {
+    return fetch(API + path + "?ref=" + BRANCH, { headers: headers({ "Accept": "application/vnd.github.raw+json" }), cache: "no-store" })
+      .then(function (res) { if (!res.ok) throw httpError(res, "Loading " + path); return res.text(); })
+      .then(function (t) { cachePut(path, t); return t; })
+      .catch(function (err) {
+        if (err.status) throw err;
+        return cacheGet(path).then(function (t) { if (t == null) throw err; showBanner("You're offline — showing the last saved copy. Changes can't be saved until you're back online."); return t; });
+      });
+  }
+
+  // JSON data file with its version (sha), so saves can detect changes made elsewhere.
+  var shas = {};
+  function getJson(path) {
+    return fetch(API + path + "?ref=" + BRANCH, { headers: headers({ "Accept": "application/vnd.github+json" }), cache: "no-store" })
+      .then(function (res) {
+        if (res.status === 404) return null;
+        if (!res.ok) throw httpError(res, "Loading " + path);
+        return res.json();
+      })
+      .then(function (meta) {
+        if (!meta) return { exists: false, data: null };
+        shas[path] = meta.sha;
+        var p = meta.content ? Promise.resolve(b64ToText(meta.content)) : getRaw(path);
+        return p.then(function (text) { cachePut(path, text); return { exists: true, data: JSON.parse(text) }; });
+      })
+      .catch(function (err) {
+        if (err.status) throw err;
+        return cacheGet(path).then(function (t) { if (t == null) throw err; return { exists: true, data: JSON.parse(t), offline: true }; });
+      });
+  }
+  function putJson(path, obj, message) {
+    var body = { message: message || ("Update " + path + " from the app"), content: textToB64(JSON.stringify(obj, null, 2) + "\n"), branch: BRANCH };
+    if (shas[path]) body.sha = shas[path];
+    return fetch(API + path, { method: "PUT", headers: headers({ "Accept": "application/vnd.github+json", "Content-Type": "application/json" }), body: JSON.stringify(body) })
+      .then(function (res) {
+        if (res.status === 409 || res.status === 422) {
+          showBanner("Not saved: your data was changed on another device (or by Claude) since this screen loaded.", true);
+          throw httpError(res, "Saving");
+        }
+        if (!res.ok) { showBanner("Not saved — GitHub returned an error (" + res.status + "). Check your connection and try again."); throw httpError(res, "Saving"); }
+        return res.json();
+      })
+      .then(function (out) { shas[path] = out.content && out.content.sha; cachePut(path, JSON.stringify(obj)); return true; });
+  }
+
+  function showBanner(msg, offerReload) {
+    banner.innerHTML = "";
+    var t = document.createElement("div"); t.textContent = msg; banner.appendChild(t);
+    if (offerReload) {
+      var r = document.createElement("button"); r.textContent = "Reload latest"; r.onclick = function () { location.reload(); }; banner.appendChild(r);
+    }
+    var x = document.createElement("button"); x.className = "ghost"; x.textContent = "Dismiss"; x.onclick = function () { banner.style.display = "none"; }; banner.appendChild(x);
+    banner.style.display = "block";
+  }
+
+  // The API the private app pages use (same shape as the old Claude artifact database).
+  var ledgerDb = {
+    doc: function (name) {
+      var path = name === "finance-ledger/state" ? STATE_PATH : "data/" + name.replace(/[^\w.-]+/g, "_") + ".json";
+      return {
+        get: function () { return getJson(path).then(function (r) { return { exists: r.exists, data: function () { return r.data; } }; }); },
+        set: function (obj) { return putJson(path, obj, "Save from the app"); }
+      };
+    }
+  };
+  window.__ledgerApi = {
+    db: ledgerDb,
+    getText: getRaw,
+    signOut: function () { clearKey(); cacheClear(); location.reload(); }
+  };
+
+  function el(html) { var d = document.createElement("div"); d.innerHTML = html; return d.firstElementChild; }
+
+  function showLoading(msg) {
+    root.innerHTML = "";
+    root.appendChild(el('<div class="screen"><div class="loading"><div class="spin"></div><div>' + (msg || "Loading your ledger…") + '</div></div></div>'));
+  }
+
+  function showUnlock(errMsg) {
+    root.innerHTML = "";
+    var card = el(
+      '<div class="screen"><form class="card" autocomplete="off">' +
+        '<div class="brand"><img src="icons/icon-192.png" alt=""><h1>Finance Ledger</h1></div>' +
+        '<p>Paste your GitHub access key to unlock. It\'s saved on this device only, so you\'ll only need to do this once per device.</p>' +
+        '<label for="k">ACCESS KEY</label>' +
+        '<input id="k" type="password" spellcheck="false" autocapitalize="off" placeholder="github_pat_…" required>' +
+        '<button type="submit">Unlock</button>' +
+        '<div class="err" id="err"></div>' +
+      '</form></div>');
+    root.appendChild(card);
+    var form = card.querySelector("form"), input = card.querySelector("#k"), err = card.querySelector("#err"), btn = card.querySelector("button");
+    if (errMsg) err.textContent = errMsg;
+    form.addEventListener("submit", function (e) {
+      e.preventDefault();
+      var k = input.value.trim();
+      if (!k) return;
+      btn.disabled = true; err.textContent = "";
+      setKey(k);
+      fetch("https://api.github.com/repos/" + OWNER + "/" + REPO, { headers: headers({ "Accept": "application/vnd.github+json" }), cache: "no-store" })
+        .then(function (res) {
+          if (res.ok) { start(); return; }
+          clearKey(); btn.disabled = false;
+          err.textContent = res.status === 401 ? "That key wasn't accepted. Check you copied all of it, and that it hasn't expired." :
+            "That key can't open the ledger's data. Make sure it has access to the Finance-ledger-data repository.";
+        })
+        .catch(function () { clearKey(); btn.disabled = false; err.textContent = "Couldn't reach GitHub. Check your connection and try again."; });
+    });
+    setTimeout(function () { input.focus(); }, 50);
+  }
+
+  function start() {
+    showLoading();
+    getRaw(LEDGER_PATH).then(function (html) {
+      // Give the app page access to the data API before any of its scripts run.
+      var shim = '<script>window.claude={use:async function(){return parent.__ledgerApi.db;}};window.__ledgerApi=parent.__ledgerApi;<\/script>';
+      html = /<head[^>]*>/i.test(html) ? html.replace(/<head[^>]*>/i, function (m) { return m + shim; }) : shim + html;
+      var frame = document.createElement("iframe");
+      frame.id = "app"; frame.title = "Li-Tran Finance Ledger";
+      frame.srcdoc = html;
+      root.innerHTML = ""; root.appendChild(frame);
+    }).catch(function (err) {
+      if (err.status === 401 || err.status === 403 || err.status === 404) { clearKey(); showUnlock("Your access key no longer works (it may have expired). Paste a new one to continue."); }
+      else showUnlock("Couldn't load the ledger: " + err.message + ". Check your connection and try again.");
+    });
+  }
+
+  if ("serviceWorker" in navigator) { navigator.serviceWorker.register("sw.js").catch(function () {}); }
+  if (getKey()) start(); else showUnlock();
+})();
+</script>
+</body>
+</html>
