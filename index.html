@@ -3,7 +3,9 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<meta name="theme-color" content="#141822">
+<meta name="theme-color" content="#141822" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#F6F4EE" media="(prefers-color-scheme: light)">
+<meta name="color-scheme" content="light dark">
 <meta name="robots" content="noindex,nofollow">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -14,7 +16,8 @@
 <link rel="icon" href="icons/favicon-64.png">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
 <style>
-  :root { --ink:#141822; --panel:#1B212C; --line:#2E3646; --paper:#E9E5D8; --dim:#9CA3B0; --gold:#C9A24B; --brick:#C1666B; }
+  :root { color-scheme:dark; --ink:#141822; --panel:#1B212C; --line:#2E3646; --paper:#E9E5D8; --dim:#9CA3B0; --gold:#C9A24B; --brick:#C1666B; }
+  @media (prefers-color-scheme: light) { :root { color-scheme:light; --ink:#F6F4EE; --panel:#FFFFFF; --line:#DAD5C8; --paper:#1C2230; --dim:#5D6574; --gold:#97741F; --brick:#B4474D; } }
   html, body { margin:0; height:100%; background:var(--ink); color:var(--paper); font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; }
   #root { height:100%; }
   #app { position:fixed; inset:0; width:100%; height:100%; border:0; display:block; background:var(--ink); }
@@ -27,7 +30,7 @@
   label { display:block; font-size:12px; letter-spacing:1px; color:var(--gold); margin:4px 0 6px; }
   input { width:100%; box-sizing:border-box; padding:11px 12px; border-radius:8px; border:1px solid var(--line); background:var(--ink); color:var(--paper); font:14px ui-monospace,Menlo,Consolas,monospace; }
   input:focus { outline:2px solid var(--gold); outline-offset:1px; }
-  button { margin-top:14px; width:100%; padding:11px; border-radius:8px; border:0; background:var(--gold); color:var(--ink); font-weight:700; font-size:15px; cursor:pointer; }
+  button { margin-top:14px; width:100%; padding:11px; border-radius:8px; border:0; background:var(--gold); color:#141822; font-weight:700; font-size:15px; cursor:pointer; }
   button[disabled] { opacity:.6; cursor:default; }
   .err { color:var(--brick); font-size:13px; margin-top:10px; min-height:1em; }
   .loading { color:var(--dim); font-size:14px; display:flex; flex-direction:column; align-items:center; gap:14px; }
